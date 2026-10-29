@@ -1,0 +1,73 @@
+rules_version = '2';
+
+// Cole este conteúdo em: Firebase Console > Firestore Database > Regras > Publicar
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(groupId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+    }
+
+    // Código de convite -> id do grupo.
+    // Pode ser lido por quem sabe o código exato, mas nunca listado.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['groupId'])
+        && request.auth.uid in getAfter(
+             /databases/$(database)/documents/groups/$(request.resource.data.groupId)
+           ).data.members;
+      allow list, update, delete: if false;
+    }
+
+    match /groups/{groupId} {
+      allow get: if signedIn() && request.auth.uid in resource.data.members;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.resource.data.members == [request.auth.uid]
+        && request.resource.data.name is string
+        && request.resource.data.inviteCode is string;
+
+      allow update: if signedIn() && (
+        // Quem já é membro pode alterar o grupo (inclusive sair dele)
+        request.auth.uid in resource.data.members
+        // Quem chegou pelo código só pode adicionar a si mesmo
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberNames'])
+          && request.resource.data.members.toSet()
+               == resource.data.members.toSet().union([request.auth.uid].toSet())
+          && request.resource.data.memberNames.diff(resource.data.memberNames)
+               .affectedKeys().hasOnly([request.auth.uid])
+        )
+      );
+
+      allow delete: if false;
+
+      match /items/{itemId} {
+        allow read, delete: if isMember(groupId);
+        allow create, update: if isMember(groupId)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 100
+          && request.resource.data.checked is bool;
+      }
+
+      match /stores/{storeId} {
+        allow read, delete: if isMember(groupId);
+        allow create, update: if isMember(groupId)
+          && request.resource.data.name is string
+          && request.resource.data.lat is number
+          && request.resource.data.lng is number
+          && request.resource.data.radius is int
+          && request.resource.data.radius >= 50
+          && request.resource.data.radius <= 1000;
+      }
+    }
+  }
+}

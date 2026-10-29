@@ -1,0 +1,11 @@
+*.iml
+.gradle/
+.idea/
+.kotlin/
+local.properties
+build/
+captures/
+.DS_Store
+
+# Configuração do seu projeto Firebase (cada um baixa o seu)
+app/google-services.json
