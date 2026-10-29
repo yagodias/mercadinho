@@ -16,26 +16,36 @@ import kotlinx.coroutines.launch
 
 /** Chamado pelo Android quando a pessoa fica alguns minutos dentro do raio de um mercado. */
 class GeofenceReceiver : BroadcastReceiver() {
-
-    override fun onReceive(context: Context, intent: Intent) {
+    override fun onReceive(
+        context: Context,
+        intent: Intent,
+    ) {
         val event = GeofencingEvent.fromIntent(intent) ?: return
         if (event.hasError()) {
             Log.w(TAG, "Erro no geofence: ${GeofenceStatusCodes.getStatusCodeString(event.errorCode)}")
+            GeofenceManager.reportError(event.errorCode)
             return
         }
         val transition = event.geofenceTransition
         if (transition != Geofence.GEOFENCE_TRANSITION_DWELL &&
             transition != Geofence.GEOFENCE_TRANSITION_ENTER
-        ) return
+        ) {
+            return
+        }
 
         val prefs = Prefs(context)
         val groupId = prefs.groupId ?: return
-        val triggeredIds = event.triggeringGeofences.orEmpty().map { it.requestId }.toSet()
+        val triggeredIds =
+            event.triggeringGeofences
+                .orEmpty()
+                .map { it.requestId }
+                .toSet()
         val now = System.currentTimeMillis()
 
-        val store = prefs.cachedStores().firstOrNull { s ->
-            s.id in triggeredIds && now - prefs.lastNotifiedAt(s.id) > COOLDOWN_MS
-        } ?: return
+        val store =
+            prefs.cachedStores().firstOrNull { s ->
+                s.id in triggeredIds && now - prefs.lastNotifiedAt(s.id) > COOLDOWN_MS
+            } ?: return
 
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {

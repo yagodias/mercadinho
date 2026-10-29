@@ -9,3 +9,6 @@ captures/
 
 # Configuração do seu projeto Firebase (cada um baixa o seu)
 app/google-services.json
+
+# Script local de mudança para o D:
+mover-para-D.*

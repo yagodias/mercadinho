@@ -46,10 +46,20 @@ Alternativa: com o celular ligado por USB e a [depuração USB ativada](https://
    - Economia de bateria: liberar
 4. Na aba **Mercados**, toque em **+ Mercado**, arraste o mapa até o pino ficar sobre o mercado, dê um nome e salve. Todos do grupo passam a receber o aviso nele.
 
+## Atualizar o app
+
+1. Gere o APK de novo e instale **por cima** do antigo (a lista e o grupo continuam).
+2. Se o arquivo `firestore.rules` mudou, cole o conteúdo novo em **Firestore Database > Regras** e clique em **Publicar**. Sem isso, as novidades que gravam dados novos (como o perfil) são recusadas.
+
+## Perfil
+
+Na aba **Perfil** cada pessoa escolhe o nome e a foto que aparecem nos itens que adiciona. A foto é reduzida para 256 px (~20 KB) e guardada no próprio Firestore, porque o Cloud Storage do Firebase exige o plano pago.
+
 ## Como o aviso funciona
 
 - Cada celular vigia os mercados sozinho; só quem está no mercado recebe o aviso.
-- O aviso sai depois de **~2 minutos dentro do raio**, para não disparar quando você só passa na frente.
+- O aviso sai depois de **~1 minuto dentro do raio**, para não disparar quando você só passa na frente.
+- Some a isso o tempo que o Android leva para perceber que você chegou: com o app fechado ele confere a localização a cada poucos minutos. Para chegar mais rápido: deixe o **Wi-Fi ligado** (ajuda muito dentro do mercado, onde o GPS é fraco) e use raio de **250 m**, que detecta a chegada ainda no caminho.
 - Só avisa se houver **itens não riscados** na lista.
 - No máximo **um aviso por mercado a cada 2 horas**.
 - Depois de reiniciar o celular, os mercados são recadastrados automaticamente.

@@ -6,6 +6,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.Source
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -19,8 +20,9 @@ import java.security.SecureRandom
  *
  * invites/{codigo}                 -> { groupId }
  * groups/{groupId}                 -> { name, inviteCode, members: [uid], memberNames: {uid: nome} }
- * groups/{groupId}/items/{id}      -> { name, checked, addedBy, createdAt }
- * groups/{groupId}/stores/{id}     -> { name, lat, lng, radius, addedBy, createdAt }
+ * groups/{groupId}/items/{id}      -> { name, checked, addedBy, addedByUid, createdAt }
+ * groups/{groupId}/stores/{id}     -> { name, lat, lng, radius, osmId?, addedBy, createdAt }
+ * groups/{groupId}/members/{uid}   -> { name, photo (JPEG Base64)?, updatedAt }
  *
  * Escritas de itens e mercados não esperam o servidor: o Firestore grava no
  * cache local na hora e sincroniza quando houver internet (útil dentro do mercado).
@@ -40,6 +42,9 @@ class Repository(
     private fun groupRef(gid: String): DocumentReference = db.collection("groups").document(gid)
     private fun itemsRef(gid: String) = groupRef(gid).collection("items")
     private fun storesRef(gid: String) = groupRef(gid).collection("stores")
+    private fun membersRef(gid: String) = groupRef(gid).collection("members")
+
+    val currentUid: String? get() = auth.currentUser?.uid
 
     // ---------- Grupo ----------
 
@@ -90,6 +95,7 @@ class Repository(
 
     fun leaveGroup(gid: String) {
         val uid = auth.currentUser?.uid ?: return
+        membersRef(gid).document(uid).delete()
         groupRef(gid).update(
             mapOf<String, Any>(
                 "members" to FieldValue.arrayRemove(uid),
@@ -128,6 +134,54 @@ class Repository(
         awaitClose { reg.remove() }
     }
 
+    // ---------- Perfis ----------
+
+    /** Perfis de todos do grupo: uid -> perfil */
+    fun observeProfiles(gid: String): Flow<Map<String, Profile>> = callbackFlow {
+        val reg = membersRef(gid).addSnapshotListener { snap, err ->
+            if (err != null || snap == null) return@addSnapshotListener
+            trySend(
+                snap.documents.associate { d ->
+                    d.id to Profile(
+                        uid = d.id,
+                        name = d.getString("name").orEmpty(),
+                        photo = d.getString("photo")?.takeIf { it.isNotBlank() },
+                    )
+                },
+            )
+        }
+        awaitClose { reg.remove() }
+    }
+
+    /** Cria o perfil de quem já estava no grupo antes desta versão. */
+    suspend fun ensureProfile(gid: String, name: String) {
+        val uid = ensureSignedIn()
+        val doc = membersRef(gid).document(uid)
+        val exists = runCatching { doc.get(Source.SERVER).await().exists() }.getOrDefault(true)
+        if (!exists && name.isNotBlank()) {
+            doc.set(mapOf("name" to name, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+        }
+    }
+
+    fun saveProfileName(gid: String, name: String) {
+        val uid = auth.currentUser?.uid ?: return
+        membersRef(gid).document(uid).set(
+            mapOf("name" to name, "updatedAt" to System.currentTimeMillis()),
+            SetOptions.merge(),
+        )
+        // Mantém o nome atualizado também na lista de membros do grupo (tela de convite)
+        groupRef(gid).update("memberNames.$uid", name)
+    }
+
+    /** [photo] em Base64, ou null para remover a foto. */
+    fun saveProfilePhoto(gid: String, name: String, photo: String?) {
+        val uid = auth.currentUser?.uid ?: return
+        membersRef(gid).document(uid).set(
+            mapOf("name" to name, "photo" to photo, "updatedAt" to System.currentTimeMillis()),
+            SetOptions.merge(),
+        )
+    }
+
     // ---------- Itens ----------
 
     fun observeItems(gid: String): Flow<List<Item>> = callbackFlow {
@@ -144,6 +198,7 @@ class Repository(
                 "name" to name,
                 "checked" to false,
                 "addedBy" to addedBy,
+                "addedByUid" to auth.currentUser?.uid,
                 "createdAt" to System.currentTimeMillis(),
             ),
         )
@@ -200,8 +255,47 @@ class Repository(
         )
     }
 
-    fun deleteStore(gid: String, storeId: String) {
-        storesRef(gid).document(storeId).delete()
+    /** Cadastra vários mercados de uma vez (importação do OpenStreetMap). */
+    fun addStores(gid: String, stores: List<OsmStore>, radius: Int, addedBy: String) {
+        val now = System.currentTimeMillis()
+        stores.chunked(450).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { s ->
+                batch.set(
+                    storesRef(gid).document(),
+                    mapOf(
+                        "name" to s.name,
+                        "lat" to s.lat,
+                        "lng" to s.lng,
+                        "radius" to radius,
+                        "osmId" to s.osmId,
+                        "addedBy" to addedBy,
+                        "createdAt" to now,
+                    ),
+                )
+            }
+            batch.commit()
+        }
+    }
+
+    fun deleteStores(gid: String, storeIds: Collection<String>) {
+        storeIds.chunked(450).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { batch.delete(storesRef(gid).document(it)) }
+            batch.commit()
+        }
+    }
+
+    fun updateStore(gid: String, storeId: String, name: String, radius: Int) {
+        storesRef(gid).document(storeId).update(mapOf<String, Any>("name" to name, "radius" to radius))
+    }
+
+    fun updateStoresRadius(gid: String, storeIds: Collection<String>, radius: Int) {
+        storeIds.chunked(450).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { batch.update(storesRef(gid).document(it), "radius", radius) }
+            batch.commit()
+        }
     }
 
     // ---------- Conversões ----------
@@ -211,6 +305,7 @@ class Repository(
         name = getString("name").orEmpty(),
         checked = getBoolean("checked") ?: false,
         addedBy = getString("addedBy").orEmpty(),
+        addedByUid = getString("addedByUid"),
         createdAtMillis = getLong("createdAt") ?: 0L,
     )
 
@@ -223,6 +318,7 @@ class Repository(
             lat = lat,
             lng = lng,
             radius = getLong("radius")?.toInt() ?: 150,
+            osmId = getString("osmId"),
         )
     }
 

@@ -5,9 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -39,10 +41,12 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.listamercado.data.Item
+import br.com.listamercado.data.Profile
 
 @Composable
 fun ListScreen(vm: AppViewModel, contentPadding: PaddingValues) {
     val allItems by vm.items.collectAsStateWithLifecycle()
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
     val pending = allItems.filter { !it.checked }
     val bought = allItems.filter { it.checked }
     var text by rememberSaveable { mutableStateOf("") }
@@ -105,6 +109,7 @@ fun ListScreen(vm: AppViewModel, contentPadding: PaddingValues) {
             items(pending, key = { it.id }) { item ->
                 ItemRow(
                     item = item,
+                    author = item.addedByUid?.let { profiles[it] },
                     onToggle = { vm.setChecked(item, true) },
                     onDelete = { vm.deleteItem(item) },
                 )
@@ -131,6 +136,7 @@ fun ListScreen(vm: AppViewModel, contentPadding: PaddingValues) {
                 items(bought, key = { it.id }) { item ->
                     ItemRow(
                         item = item,
+                        author = item.addedByUid?.let { profiles[it] },
                         onToggle = { vm.setChecked(item, false) },
                         onDelete = { vm.deleteItem(item) },
                     )
@@ -141,7 +147,9 @@ fun ListScreen(vm: AppViewModel, contentPadding: PaddingValues) {
 }
 
 @Composable
-private fun ItemRow(item: Item, onToggle: () -> Unit, onDelete: () -> Unit) {
+private fun ItemRow(item: Item, author: Profile?, onToggle: () -> Unit, onDelete: () -> Unit) {
+    // Nome atual do perfil; itens antigos (sem perfil) usam o nome gravado na hora
+    val authorName = author?.name?.ifBlank { null } ?: item.addedBy
     ListItem(
         modifier = Modifier.clickable(onClick = onToggle),
         leadingContent = {
@@ -158,8 +166,14 @@ private fun ItemRow(item: Item, onToggle: () -> Unit, onDelete: () -> Unit) {
                 },
             )
         },
-        supportingContent = if (item.addedBy.isNotBlank()) {
-            { Text("por ${item.addedBy}") }
+        supportingContent = if (authorName.isNotBlank()) {
+            {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(authorName, author?.photo, 18.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(authorName)
+                }
+            }
         } else {
             null
         },

@@ -50,9 +50,11 @@ import br.com.listamercado.data.Group
 fun MainScreen(vm: AppViewModel) {
     val group by vm.group.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var addingStore by rememberSaveable { mutableStateOf(false) }
+    var importingStores by rememberSaveable { mutableStateOf(false) }
     var showInvite by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -62,6 +64,18 @@ fun MainScreen(vm: AppViewModel) {
         val text = message ?: return@LaunchedEffect
         snackbar.showSnackbar(text)
         vm.consumeMessage()
+    }
+
+    if (importingStores) {
+        BackHandler { importingStores = false }
+        ImportStoresScreen(
+            vm = vm,
+            onClose = {
+                importingStores = false
+                tab = 1
+            },
+        )
+        return
     }
 
     if (addingStore) {
@@ -91,6 +105,13 @@ fun MainScreen(vm: AppViewModel) {
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
+                                text = { Text("Importar mercados da cidade") },
+                                onClick = {
+                                    menuOpen = false
+                                    importingStores = true
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Sair do grupo") },
                                 onClick = {
                                     menuOpen = false
@@ -116,6 +137,15 @@ fun MainScreen(vm: AppViewModel) {
                     icon = { Icon(Icons.Default.Place, contentDescription = null) },
                     label = { Text("Mercados") },
                 )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = {
+                        val me = vm.myUid?.let { profiles[it] }
+                        Avatar(me?.name ?: vm.userName, me?.photo, 24.dp)
+                    },
+                    label = { Text("Perfil") },
+                )
             }
         },
         floatingActionButton = {
@@ -131,7 +161,8 @@ fun MainScreen(vm: AppViewModel) {
     ) { padding ->
         when (tab) {
             0 -> ListScreen(vm, padding)
-            else -> StoresScreen(vm, padding)
+            1 -> StoresScreen(vm, padding, onImport = { importingStores = true })
+            else -> ProfileScreen(vm, padding, onLeaveGroup = { confirmLeave = true })
         }
     }
 
